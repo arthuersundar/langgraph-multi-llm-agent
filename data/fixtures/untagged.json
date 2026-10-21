@@ -1,0 +1,17 @@
+{
+  "source": "fixture (sample data for the Brightway demo company)",
+  "region": "us-east-1",
+  "scanned": 412,
+  "non_compliant": 8,
+  "resources": [
+    {"arn": "arn:aws:ec2:us-east-1:111122223333:instance/i-0f3a91c2d7e84b510", "missing": ["owner", "team", "environment"]},
+    {"arn": "arn:aws:s3:::brightway-tmp-exports-2291", "missing": ["owner", "team", "cost-center", "application"]},
+    {"arn": "arn:aws:rds:us-east-1:111122223333:db:analytics-scratch", "missing": ["owner", "environment"]},
+    {"arn": "arn:aws:lambda:us-east-1:111122223333:function:sync-prices-test", "missing": ["owner", "team", "cost-center", "environment", "application"]},
+    {"arn": "arn:aws:ec2:us-east-1:111122223333:volume/vol-0c19ab52e6d7f3a08", "missing": ["team", "cost-center"]},
+    {"arn": "arn:aws:elasticloadbalancing:us-east-1:111122223333:loadbalancer/app/legacy-promo/50dc6c495c0c9188", "missing": ["owner"]},
+    {"arn": "arn:aws:eks:us-east-1:111122223333:cluster/ml-experiments-sbx", "missing": ["cost-center", "application"]},
+    {"arn": "arn:aws:ec2:us-east-1:111122223333:natgateway/nat-0b7e41d9c2a6f8e35", "missing": ["team", "application"]}
+  ],
+  "truncated": false
+}

@@ -1,0 +1,18 @@
+{
+  "source": "fixture (sample data for the Brightway demo company)",
+  "period": "last 30 days (fixture)",
+  "total_usd": 86105.87,
+  "top_services": [
+    {"service": "Amazon Elastic Compute Cloud - Compute", "usd": 28450.12},
+    {"service": "Amazon Simple Storage Service", "usd": 14210.50},
+    {"service": "Amazon Relational Database Service", "usd": 11820.00},
+    {"service": "EC2 - Other", "usd": 9640.33},
+    {"service": "Amazon Elastic Container Service for Kubernetes", "usd": 7950.00},
+    {"service": "Amazon Bedrock", "usd": 5320.75},
+    {"service": "AWS Glue", "usd": 3100.00},
+    {"service": "Amazon CloudWatch", "usd": 2310.40},
+    {"service": "AWS Lambda", "usd": 1980.20},
+    {"service": "Amazon Athena", "usd": 640.10}
+  ],
+  "note": null
+}

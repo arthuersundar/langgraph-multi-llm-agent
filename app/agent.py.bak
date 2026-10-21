@@ -1,0 +1,110 @@
+"""LangGraph agent: answers AWS cost/governance questions from company policies (RAG)
+plus live AWS data, on either Bedrock or a self-hosted model.
+
+Graph:   START -> agent -> (tool calls?) -> tools -> agent -> ... -> END
+
+Usage:
+    python app/agent.py "Which resources are missing required tags and what happens to them?"
+    python app/agent.py --provider vllm "What were our top services last month?"
+"""
+import json
+import os
+import sys
+
+from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.tools import tool
+from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.prebuilt import ToolNode, tools_condition
+
+from aws_tools import find_untagged_resources, get_cost_by_service
+from llm import get_llm
+from search import search_policies
+
+load_dotenv()
+
+SYSTEM_PROMPT = """You are a cloud cost and governance assistant for Brightway.
+You have two kinds of sources:
+- search_policies: company policies, runbooks and postmortems (what the rules are, what to do).
+- get_cost_by_service and find_untagged_resources: live AWS data (what is happening now).
+
+Rules:
+- Use a tool whenever the question depends on company policy or on current AWS data. Do not guess.
+- For "what should we do" questions, combine both: look up the policy, then check the live data.
+- Quote the policy by its document title. Report numbers exactly as the tools return them.
+- If a tool returns an error or nothing relevant, say so plainly. Never invent figures or policies.
+- You can only read. You cannot change AWS resources; recommend actions instead."""
+
+
+@tool
+def search_policies_tool(question: str, doc_type: str | None = None) -> str:
+    """Search company policies, runbooks, guides and postmortems. Optional doc_type filter:
+    policy, runbook, guide, standard, directory, postmortem."""
+    hits = search_policies(question, top_k=4, doc_type=doc_type)
+    return json.dumps(
+        [{"title": h["title"], "section": h["section"], "text": h["text"]} for h in hits]
+    )
+
+
+@tool
+def cost_by_service_tool(days: int = 30) -> str:
+    """Live AWS spend per service for the last N days (default 30), highest first."""
+    return json.dumps(get_cost_by_service(days=days))
+
+
+@tool
+def untagged_resources_tool() -> str:
+    """Live list of AWS resources missing any required tag (owner, team, cost-center,
+    environment, application)."""
+    return json.dumps(find_untagged_resources())
+
+
+TOOLS = [search_policies_tool, cost_by_service_tool, untagged_resources_tool]
+
+
+def build_graph(provider: str | None = None):
+    llm = get_llm(provider or os.getenv("LLM_PROVIDER", "bedrock")).bind_tools(TOOLS)
+
+    def agent(state: MessagesState):
+        return {"messages": [llm.invoke([SystemMessage(SYSTEM_PROMPT)] + state["messages"])]}
+
+    g = StateGraph(MessagesState)
+    g.add_node("agent", agent)
+    g.add_node("tools", ToolNode(TOOLS, handle_tool_errors=True))
+    g.add_edge(START, "agent")
+    g.add_conditional_edges("agent", tools_condition)  # tool call -> "tools", else END
+    g.add_edge("tools", "agent")
+    return g.compile()
+
+
+def ask(question: str, provider: str | None = None, verbose: bool = True) -> str:
+    graph = build_graph(provider)
+    final = ""
+    for step in graph.stream(
+        {"messages": [HumanMessage(question)]},
+        {"recursion_limit": 12},  # caps the tool loop so a confused model cannot spin forever
+        stream_mode="updates",
+    ):
+        for node, update in step.items():
+            msg = update["messages"][-1]
+            if node == "agent":
+                for call in getattr(msg, "tool_calls", []) or []:
+                    if verbose:
+                        print(f"  -> {call['name']}({call['args']})")
+                if not getattr(msg, "tool_calls", None):
+                    final = msg.content if isinstance(msg.content, str) else str(msg.content)
+            elif verbose:
+                print(f"  <- {msg.name}: {str(msg.content)[:120]}...")
+    return final
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    provider = None
+    if "--provider" in args:
+        i = args.index("--provider")
+        provider = args[i + 1]
+        args = args[:i] + args[i + 2:]
+    q = " ".join(args) or "Which resources are missing required tags and what is the policy for fixing them?"
+    print(f"Q: {q}\n")
+    print("\nA:", ask(q, provider))

@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars (which is gitignored) and edit.
+# default_backend = "bedrock"
+# vllm_base_url   = "https://YOUR-GPU-HOST:8000/v1"   # only while a GPU session is running
+# vllm_model      = "Qwen/Qwen2.5-7B-Instruct"
