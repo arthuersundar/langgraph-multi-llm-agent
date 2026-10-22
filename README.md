@@ -123,5 +123,3 @@ gateway/    lambda/ (handler + tests) | terraform/ | bootstrap/ (optional state 
 ```
 
 Stack: Python, LangGraph, LangChain, S3 Vectors, Ollama, Amazon Bedrock, API Gateway, Lambda, Terraform.
-
-Never commit `.env`, Terraform state or `terraform.tfvars`.
