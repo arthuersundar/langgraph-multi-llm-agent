@@ -6,6 +6,8 @@ Graph:   START -> agent -> (tool calls?) -> tools -> agent -> ... -> END
 Usage:
     python app/agent.py "Which resources are missing required tags and what happens to them?"
     python app/agent.py --provider vllm "What were our top services last month?"
+    python app/agent.py --provider auto "..."  # router: cheap model for easy questions, strong for hard
+    python app/agent.py --sources "..."        # also show the policy chunks and live data it was given
     USE_FIXTURES=1 python app/agent.py "..."   # sample cost/tag data instead of live AWS
         (PowerShell: $env:USE_FIXTURES="1"; python app\agent.py "...")
 """
@@ -21,6 +23,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from aws_tools import find_untagged_resources, get_cost_by_service
 from llm import get_llm
+from router import choose, is_action, parse_spec
 from search import search_policies
 
 load_dotenv()
@@ -40,10 +43,11 @@ Rules:
 
 
 @tool
-def search_policies_tool(question: str, doc_type: str | None = None) -> str:
-    """Search company policies, runbooks, guides and postmortems. Optional doc_type filter:
-    policy, runbook, guide, standard, directory, postmortem."""
-    hits = search_policies(question, top_k=4, doc_type=doc_type)
+def search_policies_tool(question: str) -> str:
+    """Search company policies, runbooks, guides, standards, the team directory and
+    postmortems. Returns the passages most relevant to the question."""
+    # No doc_type filter is offered to the model: a wrong filter silently returns nothing.
+    hits = search_policies(question, top_k=4)
     return json.dumps(
         [{"title": h["title"], "section": h["section"], "text": h["text"]} for h in hits]
     )
@@ -62,11 +66,16 @@ def untagged_resources_tool() -> str:
     return json.dumps(find_untagged_resources())
 
 
+# Guardrail in code, not in the model: a request to change AWS is always answered with this
+# first, because small models often skip the refusal. Set GUARD_ACTIONS=0 to see the raw model.
+ACTION_REFUSAL = ("I can't delete or change AWS resources: this assistant has read-only access. "
+                  "What I can do is tell you what the policies say should happen:\n\n")
+
 TOOLS = [search_policies_tool, cost_by_service_tool, untagged_resources_tool]
 
 
-def build_graph(provider: str | None = None):
-    llm = get_llm(provider or os.getenv("LLM_PROVIDER", "bedrock")).bind_tools(TOOLS)
+def build_graph(provider: str | None = None, model: str | None = None):
+    llm = get_llm(provider or os.getenv("LLM_PROVIDER", "bedrock"), model).bind_tools(TOOLS)
 
     def agent(state: MessagesState):
         return {"messages": [llm.invoke([SystemMessage(SYSTEM_PROMPT)] + state["messages"])]}
@@ -80,7 +89,30 @@ def build_graph(provider: str | None = None):
     return g.compile()
 
 
-def run(question: str, provider: str | None = None, graph=None, verbose: bool = False) -> dict:
+def show_result(msg, detail: bool) -> None:
+    """Print what a tool handed back to the model. With detail=True the policy chunks are
+    listed by title and opening text, and live data is shown in full, so you can see exactly
+    what the model was given before it wrote its answer."""
+    content = str(msg.content)
+    if not detail:
+        print(f"  <- {msg.name}: {content[:120]}...")
+        return
+    print(f"  <- {msg.name} returned:")
+    try:
+        data = json.loads(content)
+    except ValueError:
+        print("     " + content[:600])
+        return
+    if msg.name == "search_policies_tool" and isinstance(data, list):
+        for hit in data:
+            body = hit["text"].split("\n\n", 1)[-1].replace("\n", " ")
+            print(f"     [policy] {hit['title']} > {hit['section']}: {body[:140]}...")
+    else:
+        print("     [live data] " + json.dumps(data)[:900])
+
+
+def run(question: str, provider: str | None = None, graph=None, verbose: bool = False,
+        detail: bool = False) -> dict:
     """Run one question. Returns the answer plus what the eval needs: which tools were
     called, how many model calls it took, and token usage when the provider reports it."""
     graph = graph or build_graph(provider)
@@ -106,17 +138,39 @@ def run(question: str, provider: str | None = None, graph=None, verbose: bool = 
                     if not getattr(msg, "tool_calls", None):
                         answer = msg.content if isinstance(msg.content, str) else str(msg.content)
                 elif verbose:
-                    print(f"  <- {msg.name}: {str(msg.content)[:120]}...")
+                    show_result(msg, detail)
+    if os.getenv("GUARD_ACTIONS", "1") != "0" and is_action(question):
+        answer = ACTION_REFUSAL + answer
     return {"answer": answer, "tools_called": tools_called, "model_calls": model_calls, "tokens": tokens}
 
 
-def ask(question: str, provider: str | None = None, verbose: bool = True) -> str:
-    return run(question, provider, verbose=verbose)["answer"]
+_routed_graphs: dict = {}
+
+
+def run_routed(question: str, verbose: bool = False, detail: bool = False) -> dict:
+    """Pick the cheap or the strong model for this question (see router.py), then run it."""
+    route = choose(question)
+    spec = route["spec"]
+    if spec not in _routed_graphs:  # build each model's graph once and reuse it
+        _routed_graphs[spec] = build_graph(*parse_spec(spec))
+    if verbose:
+        print(f"  route: {route['tier']} -> {spec}  ({route['reason']})")
+    out = run(question, graph=_routed_graphs[spec], verbose=verbose, detail=detail)
+    out["route"] = route
+    return out
+
+
+def ask(question: str, provider: str | None = None, verbose: bool = True, detail: bool = False) -> str:
+    if provider == "auto":
+        return run_routed(question, verbose=verbose, detail=detail)["answer"]
+    return run(question, provider, verbose=verbose, detail=detail)["answer"]
 
 
 if __name__ == "__main__":
     args = sys.argv[1:]
     provider = None
+    detail = "--sources" in args  # show what each tool returned, not just that it ran
+    args = [a for a in args if a != "--sources"]
     if "--provider" in args:
         i = args.index("--provider")
         provider = args[i + 1]
@@ -124,7 +178,7 @@ if __name__ == "__main__":
     q = " ".join(args) or "Which resources are missing required tags and what is the policy for fixing them?"
     print(f"Q: {q}\n")
     try:
-        print("\nA:", ask(q, provider))
+        print("\nA:", ask(q, provider, detail=detail))
     except Exception as e:
         if "ThrottlingException" in f"{type(e).__name__} {e}":
             sys.exit("\nBedrock daily token quota reached (account limit, not a code bug).\n"

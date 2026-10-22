@@ -22,29 +22,45 @@ sys.path.insert(0, str(ROOT / "app"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--provider", required=True, help="bedrock or vllm")
+ap.add_argument("--provider", required=True, help="bedrock, vllm or gateway")
 ap.add_argument("--only", help="run a single question id")
+ap.add_argument("--label", help="name for this run in the report (default: provider and model)")
 ap.add_argument("--sleep", type=float, default=0, help="seconds to wait between questions")
 ap.add_argument("--live", action="store_true", help="use live AWS data instead of fixtures")
 args = ap.parse_args()
 
 os.environ["USE_FIXTURES"] = "0" if args.live else "1"  # must be set before the tools load
 
-from agent import build_graph, run  # noqa: E402
+from agent import build_graph, run, run_routed  # noqa: E402
 from scoring import score  # noqa: E402
 
 questions = json.loads((Path(__file__).resolve().parent / "questions.json").read_text(encoding="utf-8"))
 if args.only:
     questions = [q for q in questions if q["id"] == args.only]
 
-graph = build_graph(args.provider)
+if args.provider == "bedrock":
+    model = os.getenv("BEDROCK_MODEL", "bedrock")
+elif args.provider == "gateway":
+    model = "via-gateway-" + os.getenv("GATEWAY_BACKEND", "bedrock")
+elif args.provider == "auto":
+    model = "router-{}-{}-policy-{}".format(
+        os.getenv("ROUTER_CHEAP", "vllm:llama3.2:3b").split(":", 1)[-1],
+        os.getenv("ROUTER_STRONG", "vllm:qwen2.5:7b").split(":", 1)[-1],
+        os.getenv("ROUTER_POLICY_TO", "cheap"))
+else:
+    model = os.getenv("VLLM_MODEL", args.provider)
+label = args.label or f"{args.provider}-{model}"
+label = "".join(c if c.isalnum() or c in "-._" else "_" for c in label)
+print(f"run: {label}  (data: {'live' if args.live else 'fixtures'})\n")
+
+graph = None if args.provider == "auto" else build_graph(args.provider)
 results = []
 for i, q in enumerate(questions, 1):
     t0 = time.time()
     error = None
-    out = {"answer": "", "tools_called": [], "model_calls": 0, "tokens": {"input": 0, "output": 0}}
+    out = {"answer": "", "tools_called": [], "model_calls": 0, "tokens": {"input": 0, "output": 0}, "route": None}
     try:
-        out = run(q["question"], graph=graph)
+        out = run_routed(q["question"]) if args.provider == "auto" else run(q["question"], graph=graph)
     except Exception as e:  # keep going: one failure should not stop the whole run
         error = f"{type(e).__name__}: {str(e)[:200]}"
     seconds = round(time.time() - t0, 1)
@@ -58,13 +74,16 @@ for i, q in enumerate(questions, 1):
         + [f"missing facts {s['missing_facts']}"] * bool(s["missing_facts"])
         + [f"bad phrases {s['bad_phrases']}"] * bool(s["bad_phrases"])
     )
-    print(f"[{i:>2}/{len(questions)}] {flag} {q['id']:<20} {seconds:>6}s  tools={out['tools_called']}  {detail}")
+    tier = f" [{out['route']['tier']}]" if out.get("route") else ""
+    print(f"[{i:>2}/{len(questions)}] {flag} {q['id']:<20} {seconds:>6}s{tier}  tools={out['tools_called']}  {detail}")
     if args.sleep and i < len(questions):
         time.sleep(args.sleep)
 
 n = len(results)
 summary = {
     "provider": args.provider,
+    "label": label,
+    "model": model,
     "data": "live" if args.live else "fixtures",
     "when": datetime.now().isoformat(timespec="seconds"),
     "questions": n,
@@ -72,15 +91,17 @@ summary = {
     "tools_ok": sum(r["tools_ok"] for r in results),
     "facts_ok": sum(r["facts_ok"] for r in results),
     "errors": sum(r["error"] is not None for r in results),
+    "routed_cheap": sum(1 for r in results if (r.get("route") or {}).get("tier") == "cheap"),
+    "total_seconds": round(sum(r["seconds"] for r in results), 1),
     "avg_seconds": round(sum(r["seconds"] for r in results) / max(n, 1), 1),
     "input_tokens": sum(r["tokens"]["input"] for r in results),
     "output_tokens": sum(r["tokens"]["output"] for r in results),
 }
-print(f"\n{args.provider}: {summary['passed']}/{n} passed | tools {summary['tools_ok']}/{n} | "
+print(f"\n{label}: {summary['passed']}/{n} passed | tools {summary['tools_ok']}/{n} | "
       f"facts {summary['facts_ok']}/{n} | errors {summary['errors']} | avg {summary['avg_seconds']}s")
 
 out_dir = Path(__file__).resolve().parent / "results"
 out_dir.mkdir(exist_ok=True)
-path = out_dir / f"{args.provider}-{datetime.now():%Y%m%d-%H%M%S}.json"
+path = out_dir / f"{label}-{datetime.now():%Y%m%d-%H%M%S}.json"
 path.write_text(json.dumps({"summary": summary, "results": results}, indent=2), encoding="utf-8")
 print(f"saved {path.relative_to(ROOT)}")

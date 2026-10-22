@@ -9,7 +9,7 @@ results_dir = Path(__file__).resolve().parent / "results"
 latest = {}
 for f in sorted(results_dir.glob("*.json")):  # filenames sort by time, so the last one wins
     d = json.loads(f.read_text(encoding="utf-8"))
-    latest[d["summary"]["provider"]] = d
+    latest[d["summary"].get("label", d["summary"]["provider"])] = d
 
 if not latest:
     raise SystemExit("No result files yet. Run: python eval/run_eval.py --provider vllm")
@@ -23,6 +23,8 @@ rows = [
     ("Facts correct", lambda s, n: f"{s['facts_ok']}/{n}"),
     ("Run errors", lambda s, n: str(s["errors"])),
     ("Avg seconds per question", lambda s, n: str(s["avg_seconds"])),
+    ("Total run time (s)", lambda s, n: str(s.get("total_seconds", "n/a"))),
+    ("Sent to the cheap model", lambda s, n: f"{s['routed_cheap']}/{n}" if s["provider"] == "auto" else "-"),
     ("Tokens in / out", lambda s, n: f"{s['input_tokens']:,} / {s['output_tokens']:,}" if s["input_tokens"] else "n/a"),
 ]
 for label, fn in rows:
