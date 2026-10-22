@@ -40,6 +40,8 @@ python app\agent.py --provider vllm --sources "Which resources are missing requi
 python app\agent.py --provider auto "What is the monthly spending cap for sandbox accounts?"
 ```
 
+On macOS/Linux use `export USE_FIXTURES=1` instead of ` $env:USE_FIXTURES="1"` ` and forward slashes in paths.
+
 `--sources` prints what each tool handed the model (policy chunks, live data), so you can see what the answer is based on.
 
 **Fixtures vs live.** `USE_FIXTURES=1` serves fixed sample data from `data/fixtures/` (invented spend and 8 untagged resources) so demos and evals give the same answer every run. Without it the tools call your real AWS account.
