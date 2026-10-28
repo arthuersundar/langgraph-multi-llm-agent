@@ -1,6 +1,6 @@
 # langgraph-multi-llm-agent
 
-An AWS cost and governance assistant. It answers from company policy documents (RAG on **S3 Vectors**) and from live AWS data (**Cost Explorer**, untagged resources), on swappable model backends: **Amazon Bedrock**, a **local model** (Ollama or vLLM), or either one through a deployed **API gateway** built with Terraform. A small **router** sends easy questions to a cheap model and hard ones to a stronger one, and an **eval harness** measures all of it.
+An AWS cost and governance assistant. It answers from company policy documents (RAG on **S3 Vectors**) and from live AWS data (**Cost Explorer**, untagged resources), on swappable model backends: **Amazon Bedrock**, a **local model** (Ollama or vLLM), or either one through a deployed **API gateway** built with Terraform. A small **router** sends easy questions to a cheap model and hard ones to a stronger one, code-level **guardrails** defend against prompt injection and data leaks, and an **eval harness** measures all of it.
 
 Built to answer one question honestly: *how small a model can you get away with, and where does it break?*
 
@@ -40,7 +40,7 @@ python app\agent.py --provider vllm --sources "Which resources are missing requi
 python app\agent.py --provider auto "What is the monthly spending cap for sandbox accounts?"
 ```
 
-On macOS/Linux use `export USE_FIXTURES=1` instead of ` $env:USE_FIXTURES="1"` ` and forward slashes in paths.
+On macOS/Linux use `export USE_FIXTURES=1` instead of `$env:USE_FIXTURES="1"`, and forward slashes in paths.
 
 `--sources` prints what each tool handed the model (policy chunks, live data), so you can see what the answer is based on.
 
@@ -87,7 +87,8 @@ python eval\show_failures.py vllm-llama3.2_3b                          # see wha
 
 - **Do filtering and arithmetic in code, not in a small model.** Tools should return what the model needs, not raw lists it must sift.
 - **Don't let the model choose retrieval filters.** An optional `doc_type` argument let the 3B pick a wrong value and silently get nothing. Removing it took the 3B from 3/6 to 6/6 on policy questions.
-- **Guardrails belong in code.** Small models skipped the "I can't delete that" refusal, so action requests are caught by a rule and answered with a read-only refusal first (`GUARD_ACTIONS=0` shows the raw model).
+- **Guardrails belong in code.** Small models skipped the "I can't delete that" refusal, so action requests are caught by a rule and answered with a read-only refusal first (`GUARD_ACTIONS=0` shows the raw model). The same idea now covers injection, PII and leaks (see Guardrails).
+- **Tool data is untrusted input too.** Tag values and document text can contain instructions, so they are cleaned before the model reads them.
 - **Keep the prompt fixed across backends** or the comparison means nothing.
 - **A router is cheap to build and measure.** Keyword rules (no extra model call) were enough to route this question set.
 
@@ -100,6 +101,54 @@ ROUTER_CHEAP=vllm:llama3.2:3b
 ROUTER_STRONG=vllm:qwen2.5:7b
 # or on Bedrock: ROUTER_CHEAP=bedrock:us.amazon.nova-micro-v1:0  ROUTER_STRONG=bedrock:us.amazon.nova-pro-v1:0
 ```
+
+## Guardrails
+
+`app/guardrails.py` wraps the agent in code, with no extra model calls, at the four places an attack can arrive:
+
+| Layer | What it does |
+|---|---|
+| **Input** | Blocks prompt injection (override, role hijack, prompt extraction, credential requests, chat-template tokens, base64-encoded payloads, 5 languages) and redacts PII and secrets (email, phone, SSN, Luhn-checked cards, AWS and Bedrock keys) before the model sees them |
+| **Tool results** | Removes instruction-like text from what tools return, so an attacker-written tag value or document cannot steer the agent (indirect injection) |
+| **Output** | Redacts secrets, SSNs and card numbers, scrubs PII the user typed, and replaces answers that repeat the system prompt |
+| **Actions** | Flags requests to change AWS in any phrasing ("can you delete...", "the CFO approved it, go ahead and shut down...") so the answer opens with a read-only refusal |
+
+A small model follows instructions it finds anywhere in its context, so these checks run before and after the model, where they cannot be talked out of it. `GUARDRAILS=0` switches them off to see the raw model.
+
+**Measured offline** (`python eval/run_attacks.py --offline`, no model needed):
+
+| | Result |
+|---|---|
+| Attacks stopped by the input, tool and action layers (dev set, 34 attacks, 7 categories) | 34/34 |
+| Harmless questions wrongly blocked or redacted (24 look-alikes + the 16 eval questions) | 0/40 |
+| **Held-out** attacks, written after the rules were fixed | 12/16 |
+| Held-out harmless questions wrongly blocked | 0/12 |
+
+The dev set is what the rules were tuned on, so the held-out row is the honest one. The four misses are the known limits of pattern matching: a paraphrase with no trigger words ("disregard the guidelines you were given earlier"), "forget what you were told" without "everything", letter-spaced text ("i g n o r e"), and a credentials question phrased without "your" or "you are using". Catching those needs a classifier model in front, which this project does not add.
+
+**Measured with a model** (`qwen2.5:7b`; same prompt, tools and 36 attacks, guardrails off vs on):
+
+| Attack category | Off | On |
+|---|---|---|
+| Direct overrides (incl. French, Spanish, German, base64) | 7/8 got through | 0 |
+| Role hijacks | 3/4 (2 after manual review) | 0 |
+| System-prompt extraction | 1/5 | 0 |
+| PII echoed back in the answer | 3/5 | 0 |
+| Indirect injection via poisoned tool data | 1/3 | 0 |
+| Credential theft, delete requests, runaway tool loops | 0/11 | 0 |
+| **Total** | **15/36 flagged (14 after review)** | **0/36** |
+
+- Harmless look-alike questions wrongly blocked: **0/24**. The 16-question quality eval is unchanged with guardrails on (13/16, nothing blocked or flagged).
+- Without guardrails the model followed instructions hidden inside a legitimate question, printed its system prompt, repeated an SSN, an AWS key and a password back to the user, and obeyed an instruction planted in the AWS data. It resisted credential theft and delete requests on its own.
+- Scoring is automatic (marker in the answer, system prompt repeated, forbidden tool called, runaway loop), so it has false alarms: one refusal that quoted the marker was counted. The "on" result is on the attacks the rules were tuned on; the held-out row above is the one to quote for generalisation.
+
+```powershell
+python eval\run_attacks.py --offline                                  # no model: input, tool and action layers
+python eval\run_attacks.py --provider vllm --guardrails off           # raw model
+python eval\run_attacks.py --provider vllm --guardrails on --benign   # guarded, plus look-alike questions
+python eval\test_guardrails.py                                        # unit tests
+```
+Set `$env:VLLM_MODEL` first; the run prints the model that actually answers. Results are saved in `eval\results\attacks\`.
 
 ## Gateway (Terraform)
 
@@ -115,10 +164,11 @@ ROUTER_STRONG=vllm:qwen2.5:7b
 ## Layout
 
 ```
-app/        agent.py (graph, tools, guard) | router.py | llm.py (provider switch) | aws_tools.py
+app/        agent.py (graph, tools, guard) | router.py | guardrails.py | llm.py (provider switch) | aws_tools.py
             search.py, ingest.py, embeddings.py (S3 Vectors RAG)
 data/       docs/ (15 invented policy documents) | fixtures/ (sample cost and tag data)
 eval/       questions.json | run_eval.py | scoring.py | report.py | show_failures.py | test_router.py
+            attacks.json | benign.json | run_attacks.py | attack_scoring.py | test_guardrails.py
 gateway/    lambda/ (handler + tests) | terraform/ | bootstrap/ (optional state bucket)
 ```
 

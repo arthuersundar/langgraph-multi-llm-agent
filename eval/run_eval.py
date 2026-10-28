@@ -91,6 +91,8 @@ summary = {
     "tools_ok": sum(r["tools_ok"] for r in results),
     "facts_ok": sum(r["facts_ok"] for r in results),
     "errors": sum(r["error"] is not None for r in results),
+    "guard_blocked": sum(1 for r in results if (r.get("guard") or {}).get("blocked")),
+    "guard_flagged": sum(1 for r in results if (r.get("guard") or {}).get("events")),
     "routed_cheap": sum(1 for r in results if (r.get("route") or {}).get("tier") == "cheap"),
     "total_seconds": round(sum(r["seconds"] for r in results), 1),
     "avg_seconds": round(sum(r["seconds"] for r in results) / max(n, 1), 1),
@@ -99,6 +101,8 @@ summary = {
 }
 print(f"\n{label}: {summary['passed']}/{n} passed | tools {summary['tools_ok']}/{n} | "
       f"facts {summary['facts_ok']}/{n} | errors {summary['errors']} | avg {summary['avg_seconds']}s")
+print(f"guardrails: {summary['guard_blocked']} questions blocked, {summary['guard_flagged']} flagged "
+      f"(on the normal question set both should be 0)")
 
 out_dir = Path(__file__).resolve().parent / "results"
 out_dir.mkdir(exist_ok=True)

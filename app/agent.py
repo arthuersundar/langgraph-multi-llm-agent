@@ -10,6 +10,7 @@ Usage:
     python app/agent.py --sources "..."        # also show the policy chunks and live data it was given
     USE_FIXTURES=1 python app/agent.py "..."   # sample cost/tag data instead of live AWS
         (PowerShell: $env:USE_FIXTURES="1"; python app\agent.py "...")
+    GUARDRAILS=0 python app/agent.py "..."     # switch the guardrails off (see app/guardrails.py)
 """
 import json
 import os
@@ -21,6 +22,7 @@ from langchain_core.tools import tool
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
+import guardrails
 from aws_tools import find_untagged_resources, get_cost_by_service
 from llm import get_llm
 from router import choose, is_action, parse_spec
@@ -42,28 +44,33 @@ Rules:
 - You can only read. You cannot change AWS resources; recommend actions instead."""
 
 
+def _safe(tool_name: str, text: str) -> str:
+    """Guardrail layer 2: clean what a tool returns before the model reads it."""
+    return guardrails.sanitize_tool_output(tool_name, text)[0] if guardrails.enabled() else text
+
+
 @tool
 def search_policies_tool(question: str) -> str:
     """Search company policies, runbooks, guides, standards, the team directory and
     postmortems. Returns the passages most relevant to the question."""
     # No doc_type filter is offered to the model: a wrong filter silently returns nothing.
-    hits = search_policies(question, top_k=4)
-    return json.dumps(
+    hits = search_policies(question[:500], top_k=4)  # cap the query length the model can send
+    return _safe("search_policies_tool", json.dumps(
         [{"title": h["title"], "section": h["section"], "text": h["text"]} for h in hits]
-    )
+    ))
 
 
 @tool
 def cost_by_service_tool(days: int = 30) -> str:
     """Live AWS spend per service for the last N days (default 30), highest first."""
-    return json.dumps(get_cost_by_service(days=days))
+    return _safe("cost_by_service_tool", json.dumps(get_cost_by_service(days=days)))
 
 
 @tool
 def untagged_resources_tool() -> str:
     """Live list of AWS resources missing any required tag (owner, team, cost-center,
     environment, application)."""
-    return json.dumps(find_untagged_resources())
+    return _safe("untagged_resources_tool", json.dumps(find_untagged_resources()))
 
 
 # Guardrail in code, not in the model: a request to change AWS is always answered with this
@@ -118,6 +125,17 @@ def run(question: str, provider: str | None = None, graph=None, verbose: bool = 
     graph = graph or build_graph(provider)
     answer, tools_called, model_calls = "", [], 0
     tokens = {"input": 0, "output": 0}
+    asked, echo = question, []
+    guardrails.drain()
+    if guardrails.enabled():  # layer 1: block attacks, redact PII, before any model call
+        verdict = guardrails.check_input(question)
+        guardrails.record("input", verdict.action, verdict.findings)
+        if verdict.blocked:
+            if verbose:
+                print(f"  guardrails: blocked ({', '.join(verdict.findings)})")
+            return {"answer": verdict.text, "tools_called": [], "model_calls": 0, "tokens": tokens,
+                    "guard": {"blocked": True, "events": guardrails.drain()}}
+        question, echo = verdict.text, verdict.originals
     for step in graph.stream(
         {"messages": [HumanMessage(question)]},
         {"recursion_limit": 12},  # caps the tool loop so a confused model cannot spin forever
@@ -139,9 +157,16 @@ def run(question: str, provider: str | None = None, graph=None, verbose: bool = 
                         answer = msg.content if isinstance(msg.content, str) else str(msg.content)
                 elif verbose:
                     show_result(msg, detail)
-    if os.getenv("GUARD_ACTIONS", "1") != "0" and is_action(question):
+    if guardrails.enabled():  # layer 3: nothing sensitive or secret leaves in the answer
+        answer = guardrails.check_output(answer, protected=[SYSTEM_PROMPT], echo=echo).text
+    if os.getenv("GUARD_ACTIONS", "1") != "0" and (is_action(asked) or (
+            guardrails.enabled() and guardrails.asks_for_change(asked))):
         answer = ACTION_REFUSAL + answer
-    return {"answer": answer, "tools_called": tools_called, "model_calls": model_calls, "tokens": tokens}
+    events = guardrails.drain()
+    if verbose and events:
+        print(f"  guardrails: {events}")
+    return {"answer": answer, "tools_called": tools_called, "model_calls": model_calls, "tokens": tokens,
+            "guard": {"blocked": False, "events": events}}
 
 
 _routed_graphs: dict = {}

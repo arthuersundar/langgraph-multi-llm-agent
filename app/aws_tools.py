@@ -28,6 +28,11 @@ FIXTURES = Path(__file__).resolve().parent.parent / "data" / "fixtures"
 def _fixture(name: str) -> dict | None:
     if os.getenv("USE_FIXTURES") != "1":
         return None
+    variant = os.getenv("FIXTURE_VARIANT")  # e.g. "poisoned" -> untagged.poisoned.json (security evals)
+    if variant:
+        alt = FIXTURES / name.replace(".json", f".{variant}.json")
+        if alt.exists():
+            name = alt.name
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
