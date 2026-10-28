@@ -68,12 +68,18 @@ def get_cost_by_service(days: int = 30, top_n: int = 10) -> dict:
     }
 
 
-def find_untagged_resources(max_results: int = 50) -> dict:
-    """Resources missing any required tag. Uses the Resource Groups Tagging API, which
-    only sees resources that are tagged now or were tagged before, so a resource that
-    never had any tag may not appear."""
+def find_untagged_resources(max_results: int = 50, missing_tag: str | None = None) -> dict:
+    """Resources missing any required tag, or (with missing_tag) missing that one tag. Uses the
+    Resource Groups Tagging API, which only sees resources that are tagged now or were tagged
+    before, so a resource that never had any tag may not appear."""
+    if missing_tag is not None and missing_tag not in REQUIRED_TAGS:
+        raise ValueError(f"missing_tag must be one of {REQUIRED_TAGS}")
     fx = _fixture("untagged.json")
     if fx:
+        if missing_tag:  # filter in code, so a small model never has to sift the list itself
+            rows = [r for r in fx["resources"] if missing_tag in r["missing"]]
+            return {**fx, "non_compliant": len(rows), "filter": f"missing the '{missing_tag}' tag",
+                    "resources": rows[:max_results]}
         return {**fx, "resources": fx["resources"][:max_results]}
     import boto3
 
@@ -90,12 +96,15 @@ def find_untagged_resources(max_results: int = 50) -> dict:
             missing = [t for t in REQUIRED_TAGS if t not in keys]
             if missing:
                 offenders.append({"arn": r["ResourceARN"], "missing": missing})
+    if missing_tag:
+        offenders = [o for o in offenders if missing_tag in o["missing"]]
     return {
         "region": REGION,
         "scanned": scanned,
         "non_compliant": len(offenders),
         "resources": offenders[:max_results],
         "truncated": len(offenders) > max_results,
+        **({"filter": f"missing the '{missing_tag}' tag"} if missing_tag else {}),
     }
 
 
