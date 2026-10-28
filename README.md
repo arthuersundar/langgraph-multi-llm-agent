@@ -157,6 +157,7 @@ Set `$env:VLLM_MODEL` first; the run prints the model that actually answers. Res
 - Every call passes through the agent's guardrails (injection refused, PII redacted, instructions in tool data removed) plus a rate limit and a per-call audit line on stderr.
 - `untagged_resources(missing_tag="owner")` filters in code. That was a failure on the small models in the eval ("which resources are missing the owner tag?"), so the fix lives in the tool.
 - Tested against the real MCP SDK with a client script (`python mcp_server/client_demo.py`) and 36 offline checks (`python eval/test_mcp_tools.py`). Setup for Claude Desktop is in [`mcp_server/README.md`](mcp_server/README.md).
+- Verified end to end through the Claude desktop app: asked "Which resources are missing the owner tag, and what does policy say should happen to them?" and it called `untagged_resources` (filtered in code) and `policy_search` (real S3 Vectors query), then answered from the results. Sample data was used for AWS spend and tags.
 
 ## Gateway (Terraform)
 
