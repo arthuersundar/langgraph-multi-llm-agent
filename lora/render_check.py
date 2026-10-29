@@ -3,7 +3,7 @@
     python lora/render_check.py [--base meta-llama/Llama-3.2-3B-Instruct]
 
 Renders a few examples with the model's chat template, marks the assistant spans that get
-loss, and checks the invariants masking depends on. Also writes lora/out/chat_template.jinja,
+loss, and checks the invariants masking depends on. Also writes lora/out/<model name>/chat_template.jinja,
 which the vLLM server must use so serving matches training exactly.
 """
 import argparse
@@ -26,9 +26,10 @@ tok = AutoTokenizer.from_pretrained(args.base)
 tpl = tok.chat_template
 if isinstance(tpl, dict):
     tpl = tpl.get("default") or next(iter(tpl.values()))
-(HERE / "out").mkdir(exist_ok=True)
-(HERE / "out" / "chat_template.jinja").write_text(tpl, encoding="utf-8")
-print("wrote lora/out/chat_template.jinja")
+short = args.base.split("/")[-1].lower()
+(HERE / "out" / short).mkdir(parents=True, exist_ok=True)
+(HERE / "out" / short / "chat_template.jinja").write_text(tpl, encoding="utf-8")
+print(f"wrote lora/out/{short}/chat_template.jinja")
 
 
 def render(messages, gen):

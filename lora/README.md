@@ -26,9 +26,11 @@ How the data avoids fooling the eval:
 
 ## Method
 
-LoRA rank 16 (alpha 32, dropout 0.05) on all attention and MLP projections, bf16 (no quantization), 3 epochs, lr 2e-4 cosine, effective batch 16. Loss only on assistant turns (`masking.py`): tool calls, answers and the end-of-turn token; not the system prompt, question or tool results. Base: `meta-llama/Llama-3.2-3B-Instruct` (the model behind the 3B results in the main README). Training and serving use the model's own chat template, exported to `out/chat_template.jinja`, so what vLLM shows the model is what it trained on.
+LoRA rank 16 (alpha 32, dropout 0.05) on all attention and MLP projections, bf16 (no quantization), 3 epochs, lr 2e-4 cosine, effective batch 16. Loss only on assistant turns (`masking.py`): tool calls, answers and the end-of-turn token; not the system prompt, question or tool results. Bases: `Qwen/Qwen2.5-3B-Instruct` and `meta-llama/Llama-3.2-3B-Instruct` (Llama is the model behind the 3B results in the main README), each trained and evaluated separately. Training and serving use the model's own chat template, exported to `out/<model name>/chat_template.jinja`, so what vLLM shows the model is what it trained on.
 
 ## Run it (Vast.ai, one GPU with 24 GB or more)
+
+**Two base models, one folder each.** Everything below is run once per model: `meta-llama/Llama-3.2-3B-Instruct` and `Qwen/Qwen2.5-3B-Instruct` (set `BASE_MODEL` on the Vast box before every command; outputs go to `lora/out/<model name>/`). Use a different `--label` per model, e.g. `vllm-qwen-base` and `vllm-qwen-tuned`, then compare each pair. Run Qwen first if Llama access is still pending.
 
 **Before renting (laptop):** accept the Llama 3.2 license on Hugging Face (gated, approval can take a while) and create a read token. No access yet? Use `export BASE_MODEL=Qwen/Qwen2.5-3B-Instruct` for every command below; it is not gated. Commit and push `lora/` so the box can clone it.
 
@@ -39,7 +41,7 @@ bash lora/vast_setup.sh
 export HF_TOKEN=hf_...            # yours; do not commit or paste it anywhere
 export VLLM_API_KEY=...           # any long random string; the same one goes in your laptop shell
 source /workspace/train-venv/bin/activate
-python lora/render_check.py       # must end with "all checks passed"; writes out/chat_template.jinja
+python lora/render_check.py       # must end with "all checks passed"; writes out/<model name>/chat_template.jinja
 python lora/train.py --smoke      # 3 steps + one generation, ~2 minutes
 ```
 
@@ -75,7 +77,7 @@ python eval\run_eval.py --provider vllm --label vllm-base2        # base again o
 python lora\compare.py base=vllm-base tuned=vllm-tuned
 python lora\compare.py base=vllm-base tuned=vllm-tuned --heldout
 ```
-Copy the adapter home (`scp -P <PORT> -r root@<IP>:~/langgraph-multi-llm-agent/lora/out/adapter .`; about 50 MB, not committed), then **destroy the Vast instance**; it bills while idle.
+Copy the adapter home (`scp -P <PORT> -r root@<IP>:~/langgraph-multi-llm-agent/lora/out/<model name>/adapter .`; about 50 MB, not committed), then **destroy the Vast instance**; it bills while idle.
 
 ## How to read the result
 

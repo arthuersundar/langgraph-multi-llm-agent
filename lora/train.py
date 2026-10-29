@@ -20,7 +20,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--base", default=DEFAULT_BASE)
 ap.add_argument("--train", default=str(HERE / "data" / "train.jsonl"))
 ap.add_argument("--val", default=str(HERE / "data" / "val.jsonl"))
-ap.add_argument("--out", default=str(HERE / "out" / "adapter"))
+ap.add_argument("--out", default=None, help="adapter folder (default: lora/out/<model name>/adapter)")
 ap.add_argument("--epochs", type=float, default=3)
 ap.add_argument("--lr", type=float, default=2e-4)
 ap.add_argument("--batch", type=int, default=2)
@@ -30,6 +30,9 @@ ap.add_argument("--rank", type=int, default=16)
 ap.add_argument("--seed", type=int, default=0)
 ap.add_argument("--smoke", action="store_true", help="tiny run to check the whole pipeline")
 args = ap.parse_args()
+SHORT = args.base.split("/")[-1].lower()   # e.g. qwen2.5-3b-instruct: each base model gets its own folder
+if args.out is None:
+    args.out = str(HERE / "out" / SHORT / "adapter")
 
 import torch  # noqa: E402
 from peft import LoraConfig, get_peft_model  # noqa: E402
