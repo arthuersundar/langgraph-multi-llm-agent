@@ -9,6 +9,7 @@ from unittest import mock
 os.environ["KEY_TEAMS"] = json.dumps({"key123": "ml-platform"})
 os.environ["VLLM_BASE_URL"] = "http://vllm.example/v1"
 os.environ["MAX_TOKENS_CAP"] = "256"
+os.environ["MODEL_PRICES"] = json.dumps({"us.amazon.nova-lite-v1:0": [0.06, 0.24]})
 import handler as h  # noqa: E402
 
 TOOL = {"type": "function", "function": {"name": "cost_by_service_tool", "description": "spend",
@@ -99,6 +100,66 @@ class FromConverse(unittest.TestCase):
         self.assertEqual(c["finish_reason"], "tool_calls")
         self.assertIsNone(c["message"]["content"])
         self.assertEqual(c["message"]["tool_calls"][0]["function"], {"name": "cost_by_service_tool", "arguments": "{\"days\": 7}"})
+
+
+class Metrics(unittest.TestCase):
+    def setUp(self):
+        h._bedrock = None
+
+    def emitted(self, ev, ctx=None):
+        with mock.patch("builtins.print") as pr:
+            r = h.handler(ev, ctx)
+        return r, json.loads(pr.call_args[0][0])
+
+    def test_cost_is_tokens_times_configured_price(self):
+        h._bedrock = FakeBedrock(text_resp("x", 1_000_000, 500_000))
+        _, m = self.emitted(event({"model": "bedrock", "messages": [{"role": "user", "content": "x"}]}))
+        self.assertAlmostEqual(m["CostUsd"], 0.06 + 0.12, places=6)  # 1M in x $0.06 + 0.5M out x $0.24
+        self.assertTrue(m["PriceKnown"])
+
+    def test_unpriced_model_costs_zero_and_is_flagged(self):
+        h._bedrock = FakeBedrock(text_resp("x", 1000, 1000))
+        _, m = self.emitted(event({"model": "bedrock/some.other-model", "messages": [{"role": "user", "content": "x"}]}))
+        self.assertEqual((m["CostUsd"], m["PriceKnown"]), (0.0, False))
+
+    def test_vllm_has_no_per_token_cost(self):
+        def fake(req, timeout=0):
+            return io.BytesIO(json.dumps({"choices": [{"message": {"content": "a"}}], "usage": {"prompt_tokens": 9, "completion_tokens": 9}}).encode())
+        with mock.patch("urllib.request.urlopen", fake):
+            _, m = self.emitted(event({"model": "vllm", "messages": [{"role": "user", "content": "x"}]}))
+        self.assertEqual((m["Backend"], m["CostUsd"], m["PriceKnown"]), ("vllm", 0.0, True))
+
+    def test_error_and_throttle_flags(self):
+        err = Exception("slow")
+        err.response = {"Error": {"Code": "ThrottlingException"}}
+        h._bedrock = FakeBedrock(error=err)
+        r, m = self.emitted(event({"model": "bedrock", "messages": [{"role": "user", "content": "x"}]}))
+        self.assertEqual((r["statusCode"], m["BackendThrottles"], m["ServerErrors"], m["CostUsd"]), (429, 1, 0, 0.0))
+        h._bedrock = FakeBedrock(error=RuntimeError("boom"))
+        r, m = self.emitted(event({"model": "bedrock", "messages": [{"role": "user", "content": "x"}]}))
+        self.assertEqual((r["statusCode"], m["BackendThrottles"], m["ServerErrors"]), (502, 0, 1))
+        r, m = self.emitted(event({"messages": []}))  # a bad request is the caller's fault: not a server error
+        self.assertEqual((r["statusCode"], m["ServerErrors"]), (400, 0))
+
+    def test_backend_time_request_id_and_no_prompt_text(self):
+        class Ctx:
+            aws_request_id = "req-abc"
+        h._bedrock = FakeBedrock(text_resp("secret answer"))
+        r, m = self.emitted(event({"model": "bedrock", "messages": [{"role": "user", "content": "secret question"}]}), Ctx())
+        self.assertEqual(m["RequestId"], "req-abc")
+        self.assertLessEqual(m["BackendMs"], m["LatencyMs"])
+        self.assertNotIn("secret", json.dumps(m))
+        declared = {x["Name"] for x in m["_aws"]["CloudWatchMetrics"][0]["Metrics"]}
+        self.assertTrue(declared <= set(m), declared - set(m))  # every declared metric has a value in the line
+
+
+class BedrockClientConfig(unittest.TestCase):
+    def test_retries_are_capped_and_timeouts_fit_inside_the_lambda(self):
+        seen = {}
+        cfg = h.bedrock_config(lambda **kw: seen.update(kw) or kw)
+        self.assertEqual(cfg["retries"], {"total_max_attempts": h.BEDROCK_MAX_ATTEMPTS, "mode": "standard"})
+        self.assertLessEqual(h.BEDROCK_MAX_ATTEMPTS, 3)
+        self.assertLess(cfg["read_timeout"], 28)  # Lambda timeout is 28 s
 
 
 class Handler(unittest.TestCase):

@@ -78,3 +78,66 @@ variable "log_retention_days" {
   type    = number
   default = 14
 }
+
+# ---- observability --------------------------------------------------------------------
+variable "model_prices" {
+  description = "USD per 1M tokens as [input, output], by Bedrock model id, used to estimate cost. These defaults are EXAMPLES: check them against the current Amazon Bedrock price list before trusting any dollar figure."
+  type        = map(list(number))
+  default = {
+    "us.amazon.nova-micro-v1:0" = [0.035, 0.14]
+    "us.amazon.nova-lite-v1:0"  = [0.06, 0.24]
+    "us.amazon.nova-pro-v1:0"   = [0.80, 3.20]
+  }
+}
+
+variable "alarm_email" {
+  description = "Email address for alarm notifications (empty = alarms only show in the console). AWS sends a confirmation link you must click."
+  type        = string
+  default     = ""
+}
+
+variable "daily_spend_alarm_usd" {
+  description = "Alarm when one team's estimated model spend exceeds this in 24 hours"
+  type        = number
+  default     = 25
+}
+
+variable "total_daily_spend_alarm_usd" {
+  description = "Alarm when estimated model spend across all teams exceeds this in 24 hours"
+  type        = number
+  default     = 50
+}
+
+variable "error_rate_alarm_pct" {
+  description = "Alarm when this percent of requests get a 5xx over two 5-minute periods"
+  type        = number
+  default     = 5
+}
+
+variable "latency_p95_alarm_ms" {
+  description = "Alarm when p95 latency at API Gateway exceeds this many milliseconds"
+  type        = number
+  default     = 15000
+}
+
+variable "throttle_alarm_count" {
+  description = "Alarm when Bedrock throttles at least this many of one team's requests in 5 minutes"
+  type        = number
+  default     = 10
+}
+
+variable "enable_tracing" {
+  description = "AWS X-Ray tracing for API Gateway and the Lambda"
+  type        = bool
+  default     = true
+}
+
+variable "bedrock_max_attempts" {
+  description = "Total tries the Lambda makes per Bedrock call (1 = no retry). Each retry of a throttled call adds seconds of waiting; callers can retry on their own."
+  type        = number
+  default     = 2
+  validation {
+    condition     = var.bedrock_max_attempts >= 1 && var.bedrock_max_attempts <= 5
+    error_message = "bedrock_max_attempts must be between 1 and 5."
+  }
+}

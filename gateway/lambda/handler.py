@@ -12,7 +12,9 @@ or "vllm"); anything else uses DEFAULT_BACKEND.
 
 Guardrails (from the Bedrock runaway postmortem): max_tokens is capped, streaming is refused,
 the request body is size-limited, every call is attributed to a team through its API key, and
-per-team token and latency metrics are emitted to CloudWatch (embedded metric format).
+per-team metrics are emitted to CloudWatch (embedded metric format): requests, tokens, latency
+(total and time spent in the model backend), estimated cost, server errors and backend throttles.
+Prompts and answers are never logged.
 
 No third-party packages: only the standard library plus boto3 (included in the Lambda runtime).
 """
@@ -31,7 +33,13 @@ VLLM_MODEL = os.getenv("VLLM_MODEL", "llama3.2:3b")
 VLLM_API_KEY = os.getenv("VLLM_API_KEY", "")
 MAX_TOKENS_CAP = int(os.getenv("MAX_TOKENS_CAP", "1024"))
 MAX_BODY_BYTES = int(os.getenv("MAX_BODY_BYTES", "200000"))
+# The AWS SDK retries a throttled call with growing waits (about 8 s on average in our measurements)
+# before giving up, which holds the caller's request open. Keep it short: the caller can retry.
+BEDROCK_MAX_ATTEMPTS = max(1, int(os.getenv("BEDROCK_MAX_ATTEMPTS", "2")))  # 1 = no retry
 KEY_TEAMS = json.loads(os.getenv("KEY_TEAMS", "{}"))  # API key id -> team name
+# Price per 1M tokens as [input_usd, output_usd], by Bedrock model id. Set from Terraform
+# (variable model_prices); the defaults there are examples to check against the AWS price list.
+MODEL_PRICES = json.loads(os.getenv("MODEL_PRICES", "{}"))
 
 _FINISH = {"end_turn": "stop", "tool_use": "tool_calls", "max_tokens": "length"}
 
@@ -160,12 +168,19 @@ def from_converse(resp: dict, model: str) -> dict:
 _bedrock = None
 
 
+def bedrock_config(config_cls):
+    """SDK settings for the Bedrock client: capped retries, and timeouts below the Lambda's 28 s."""
+    return config_cls(retries={"total_max_attempts": BEDROCK_MAX_ATTEMPTS, "mode": "standard"},
+                      connect_timeout=3, read_timeout=24)
+
+
 def _bedrock_client():
     global _bedrock
     if _bedrock is None:
         import boto3  # imported here so the translation code can be tested without boto3
+        from botocore.config import Config
 
-        _bedrock = boto3.client("bedrock-runtime")
+        _bedrock = boto3.client("bedrock-runtime", config=bedrock_config(Config))
     return _bedrock
 
 
@@ -210,24 +225,45 @@ def _reply(status: int, payload: dict) -> dict:
     return {"statusCode": status, "headers": {"content-type": "application/json"}, "body": json.dumps(payload)}
 
 
-def _emit_metrics(team: str, backend: str, usage: dict, latency_ms: int, status: int) -> None:
-    """One log line that CloudWatch turns into per-team metrics (embedded metric format)."""
+def estimate_cost(backend: str, model_id: str, usage: dict) -> tuple[float, bool]:
+    """Estimated USD for one request from token counts x configured list prices.
+    -> (cost, price_known). A self-hosted vLLM backend has no per-token charge, so it costs 0 here;
+    a Bedrock model with no configured price also costs 0 but is flagged as unpriced."""
+    if backend != "bedrock":
+        return 0.0, True
+    price = MODEL_PRICES.get(model_id)
+    if not price:
+        return 0.0, False
+    cost = (usage.get("prompt_tokens", 0) * price[0] + usage.get("completion_tokens", 0) * price[1]) / 1_000_000
+    return round(cost, 8), True
+
+
+def _emit_metrics(team: str, backend: str, model_id: str, usage: dict, latency_ms: int,
+                  backend_ms: int, status: int, request_id: str) -> None:
+    """One log line that CloudWatch turns into per-team metrics (embedded metric format).
+    The same line is searchable in Logs Insights (RequestId, Model, Status ...). No prompt text."""
+    cost, price_known = estimate_cost(backend, model_id, usage)
     print(json.dumps({
         "_aws": {"Timestamp": int(time.time() * 1000), "CloudWatchMetrics": [{
             "Namespace": "LLMGateway", "Dimensions": [["Team", "Backend"]],
             "Metrics": [{"Name": "Requests", "Unit": "Count"}, {"Name": "InputTokens", "Unit": "Count"},
-                        {"Name": "OutputTokens", "Unit": "Count"}, {"Name": "LatencyMs", "Unit": "Milliseconds"}],
+                        {"Name": "OutputTokens", "Unit": "Count"}, {"Name": "LatencyMs", "Unit": "Milliseconds"},
+                        {"Name": "BackendMs", "Unit": "Milliseconds"}, {"Name": "CostUsd", "Unit": "None"},
+                        {"Name": "ServerErrors", "Unit": "Count"}, {"Name": "BackendThrottles", "Unit": "Count"}],
         }]},
         "Team": team, "Backend": backend, "Requests": 1, "Status": status,
         "InputTokens": usage.get("prompt_tokens", 0), "OutputTokens": usage.get("completion_tokens", 0),
-        "LatencyMs": latency_ms,
+        "LatencyMs": latency_ms, "BackendMs": backend_ms, "CostUsd": cost,
+        "ServerErrors": 1 if status >= 500 else 0, "BackendThrottles": 1 if status == 429 else 0,
+        "RequestId": request_id, "Model": model_id, "PriceKnown": price_known,
     }))
 
 
 def handler(event, context=None):
     started = time.time()
     team = KEY_TEAMS.get(((event.get("requestContext") or {}).get("identity") or {}).get("apiKeyId"), "unknown")
-    backend, usage, status = "unknown", {}, 500
+    backend, model_id, usage, status, backend_ms = "unknown", "unknown", {}, 500, 0
+    request_id = getattr(context, "aws_request_id", None) or "local"
     try:
         raw = event.get("body") or ""
         if event.get("isBase64Encoded"):
@@ -244,7 +280,11 @@ def handler(event, context=None):
             raise GatewayError(400, "streaming is not supported by this gateway")
 
         backend, model_id = pick_backend(body.get("model"))
-        out = call_bedrock(body, model_id) if backend == "bedrock" else call_vllm(body)
+        t_backend = time.time()
+        try:
+            out = call_bedrock(body, model_id) if backend == "bedrock" else call_vllm(body)
+        finally:
+            backend_ms = int((time.time() - t_backend) * 1000)
         usage, status = out.get("usage", {}), 200
         return _reply(200, out)
     except GatewayError as e:
@@ -260,4 +300,4 @@ def handler(event, context=None):
         status = 502
         return _reply(502, {"error": {"message": "the model backend failed", "type": "backend_error"}})
     finally:
-        _emit_metrics(team, backend, usage, int((time.time() - started) * 1000), status)
+        _emit_metrics(team, backend, model_id, usage, int((time.time() - started) * 1000), backend_ms, status, request_id)

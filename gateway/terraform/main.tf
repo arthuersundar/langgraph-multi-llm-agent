@@ -46,6 +46,12 @@ resource "aws_iam_role_policy" "lambda" {
         Resource = "${aws_cloudwatch_log_group.lambda.arn}:*"
       },
       {
+        Sid      = "Tracing"
+        Effect   = "Allow"
+        Action   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"]
+        Resource = "*"
+      },
+      {
         Sid      = "InvokeModels"
         Effect   = "Allow"
         Action   = ["bedrock:InvokeModel"]
@@ -65,6 +71,10 @@ resource "aws_lambda_function" "gateway" {
   timeout          = 28 # API Gateway gives up at 29 seconds
   memory_size      = 256
 
+  tracing_config {
+    mode = var.enable_tracing ? "Active" : "PassThrough"
+  }
+
   environment {
     variables = {
       DEFAULT_BACKEND  = var.default_backend
@@ -73,6 +83,9 @@ resource "aws_lambda_function" "gateway" {
       VLLM_MODEL       = var.vllm_model
       VLLM_API_KEY     = var.vllm_api_key
       MAX_TOKENS_CAP   = tostring(var.max_tokens_cap)
+      MODEL_PRICES     = jsonencode(var.model_prices)
+
+      BEDROCK_MAX_ATTEMPTS = tostring(var.bedrock_max_attempts)
       KEY_TEAMS        = jsonencode({ for team, key in aws_api_gateway_api_key.team : key.id => team })
     }
   }
@@ -153,6 +166,8 @@ resource "aws_api_gateway_stage" "prod" {
   rest_api_id   = aws_api_gateway_rest_api.this.id
   deployment_id = aws_api_gateway_deployment.this.id
   stage_name    = "prod"
+
+  xray_tracing_enabled = var.enable_tracing
 }
 
 # Safety net for the whole API, on top of each team's own usage plan.
@@ -201,7 +216,7 @@ resource "aws_api_gateway_usage_plan_key" "team" {
 }
 
 # ---------------------------------------------------------------------------------------
-# Alarms (no notification target yet: add an SNS topic to alarm_actions to get paged)
+# Basic alarms (more in observability.tf). They notify the SNS topic defined there.
 # ---------------------------------------------------------------------------------------
 resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   alarm_name          = "${var.name_prefix}-lambda-errors"
@@ -214,6 +229,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   threshold           = 5
   comparison_operator = "GreaterThanOrEqualToThreshold"
   treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_actions
 }
 
 resource "aws_cloudwatch_metric_alarm" "team_tokens" {
@@ -228,4 +244,5 @@ resource "aws_cloudwatch_metric_alarm" "team_tokens" {
   threshold           = var.hourly_token_alarm
   comparison_operator = "GreaterThanThreshold"
   treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_actions
 }
