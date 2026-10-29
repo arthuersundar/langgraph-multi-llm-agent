@@ -11,3 +11,5 @@ terraform.tfvars
 terraform.tfvars
 .terraform/
 __pycache__/
+
+lora/out/

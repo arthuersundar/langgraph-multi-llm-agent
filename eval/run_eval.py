@@ -27,6 +27,7 @@ ap.add_argument("--only", help="run a single question id")
 ap.add_argument("--label", help="name for this run in the report (default: provider and model)")
 ap.add_argument("--sleep", type=float, default=0, help="seconds to wait between questions")
 ap.add_argument("--live", action="store_true", help="use live AWS data instead of fixtures")
+ap.add_argument("--questions", help="path to another question file (default: eval/questions.json)")
 args = ap.parse_args()
 
 os.environ["USE_FIXTURES"] = "0" if args.live else "1"  # must be set before the tools load
@@ -34,7 +35,8 @@ os.environ["USE_FIXTURES"] = "0" if args.live else "1"  # must be set before the
 from agent import build_graph, run, run_routed  # noqa: E402
 from scoring import score  # noqa: E402
 
-questions = json.loads((Path(__file__).resolve().parent / "questions.json").read_text(encoding="utf-8"))
+qpath = Path(args.questions) if args.questions else Path(__file__).resolve().parent / "questions.json"
+questions = json.loads(qpath.read_text(encoding="utf-8"))
 if args.only:
     questions = [q for q in questions if q["id"] == args.only]
 

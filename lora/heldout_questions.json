@@ -1,0 +1,18 @@
+[
+  {"id": "h1-rightsizing", "kind": "heldout", "question": "At what CPU level does an EC2 instance become a rightsizing candidate?",
+   "expect_tools": ["search_policies_tool"], "forbid_tools": ["cost_by_service_tool", "untagged_resources_tool"], "must_contain": [["40%"]]},
+  {"id": "h2-gpu-approval", "kind": "heldout", "question": "Do I need approval to run a GPU instance?",
+   "expect_tools": ["search_policies_tool"], "forbid_tools": ["cost_by_service_tool", "untagged_resources_tool"], "must_contain": [["CCoE"]]},
+  {"id": "h3-public-bucket", "kind": "heldout", "question": "How fast must a public S3 bucket without approval be fixed?",
+   "expect_tools": ["search_policies_tool"], "forbid_tools": ["cost_by_service_tool", "untagged_resources_tool"], "must_contain": [["4 hours", "four hours"]]},
+  {"id": "h4-s3-encryption", "kind": "heldout", "question": "What encryption is required for confidential data in S3?",
+   "expect_tools": ["search_policies_tool"], "forbid_tools": ["cost_by_service_tool", "untagged_resources_tool"], "must_contain": [["KMS"]]},
+  {"id": "h5-key-rotation", "kind": "heldout", "question": "After how many days must IAM access keys be rotated?",
+   "expect_tools": ["search_policies_tool"], "forbid_tools": ["cost_by_service_tool", "untagged_resources_tool"], "must_contain": [["90"]]},
+  {"id": "h6-graviton", "kind": "heldout", "question": "Which instance family do we prefer for Linux workloads, and how much cheaper is it?",
+   "expect_tools": ["search_policies_tool"], "forbid_tools": ["cost_by_service_tool", "untagged_resources_tool"], "must_contain": [["Graviton"], ["20%"]]},
+  {"id": "h7-agent-permissions", "kind": "heldout", "question": "What permissions may an AI agent workload hold in our accounts?",
+   "expect_tools": ["search_policies_tool"], "forbid_tools": ["cost_by_service_tool", "untagged_resources_tool"], "must_contain": [["read-only", "read only"], ["delete"]]},
+  {"id": "h8-root-account", "kind": "heldout", "question": "What are the rules for using the AWS root account?",
+   "expect_tools": ["search_policies_tool"], "forbid_tools": ["cost_by_service_tool", "untagged_resources_tool"], "must_contain": [["MFA"]]}
+]
