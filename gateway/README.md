@@ -135,3 +135,17 @@ While Bedrock quotas are 0 the traffic gets 429s, which lights up the backend-th
 - Each metric and team/backend combination that receives data is a billed custom metric (8 metrics x teams x backends, so up to 32 with the defaults; check the current CloudWatch price). Only combinations that get traffic count. Run `terraform destroy` when you are done experimenting.
 - The 24 h spend alarms use a 24-hour CloudWatch period; confirm on first deploy how the window lines up (UTC day vs. rolling) before relying on it.
 - The Terraform in `observability.tf` was written without being able to run `terraform validate` or `plan` in the authoring environment: run both and fix anything they report. The Lambda changes are covered by unit tests.
+
+
+### What the dashboard found (measured on the deployed gateway)
+
+With Bedrock token quotas at 0, 40 test requests to the `bedrock` model all came back 429. The dashboard showed:
+
+| | Before | After |
+|---|---|---|
+| Time a throttled request spent waiting on Bedrock | **7,968 ms** average over 40 requests, p95 12,557 ms (range 3.7 to 12.6 s) | **179 to 1,071 ms** in the ten newest failed requests (the table mixed old and new, so the combined average of 74 requests was 4,615 ms; the implied average for the new ones is about 670 ms, an estimate) |
+| Cause | the AWS SDK retried each throttled call with growing waits before giving up, holding the caller's request open | retries capped: `bedrock_max_attempts = 2` (total tries) and timeouts below the Lambda's limit |
+
+The throttle alarm behaved as designed: one 5-minute bucket held 11 throttled requests (threshold 10), the alarm went `OK` to `ALARM` within about 3 minutes, and returned to `OK` when the next bucket held 8. Tokens and estimated cost stayed at 0 because no call succeeded; the cost panels will show real values once Bedrock quota is restored or the `vllm` backend is used.
+
+Trade-off: with fewer retries inside the gateway, a short real throttle reaches the caller sooner, so callers should retry on their own. Raise `bedrock_max_attempts` if you prefer the gateway to absorb brief throttles.
