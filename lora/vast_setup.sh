@@ -6,13 +6,28 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 nvidia-smi --query-gpu=name,memory.total --format=csv
 
-python3 -m venv --system-site-packages /workspace/train-venv
+# Pick the PyTorch build that matches this host's driver (a CUDA 13 build will not run on a CUDA 12.6 driver).
+DRV="$(nvidia-smi | sed -n 's/.*CUDA Version: \([0-9]*\)\.\([0-9]*\).*/\1 \2/p' | head -1)"
+MAJ="${DRV% *}"; MIN="${DRV#* }"
+if   [ "$MAJ" -ge 13 ]; then TORCH_INDEX="cu130"
+elif [ "$MIN" -ge 8 ]; then TORCH_INDEX="cu128"
+elif [ "$MIN" -ge 6 ]; then TORCH_INDEX="cu126"
+else TORCH_INDEX="cu124"; fi
+echo "driver supports CUDA $MAJ.$MIN -> PyTorch build $TORCH_INDEX"
+
+rm -rf /workspace/train-venv
+python3 -m venv /workspace/train-venv   # clean: no system packages, so no torch/torchvision mix-ups
 /workspace/train-venv/bin/pip install -q -U pip
-/workspace/train-venv/bin/pip install -q -U torch transformers peft accelerate
+/workspace/train-venv/bin/pip install -q torch --index-url "https://download.pytorch.org/whl/$TORCH_INDEX"
+/workspace/train-venv/bin/pip install -q -U transformers peft accelerate
+/workspace/train-venv/bin/python -c "import torch;print('train env: torch', torch.__version__, 'cuda', torch.version.cuda, 'gpu ok:', torch.cuda.is_available())"
 
 python3 -m venv /workspace/serve-venv
 /workspace/serve-venv/bin/pip install -q -U pip
-/workspace/serve-venv/bin/pip install -q -U vllm
+# pinned: newest vLLM needs a newer driver than many Vast hosts have (CUDA 12.6); 0.11.0 + transformers<5 was verified
+/workspace/serve-venv/bin/pip install -q "vllm==0.11.0"
+/workspace/serve-venv/bin/pip install -q "transformers>=4.56,<5"
+/workspace/serve-venv/bin/python -c "import torch;print('serve env: torch', torch.__version__, 'cuda', torch.version.cuda, 'gpu ok:', torch.cuda.is_available())"
 
 echo
 echo "Done. Next:"

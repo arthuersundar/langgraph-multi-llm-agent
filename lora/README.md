@@ -88,8 +88,26 @@ Copy the adapter home (`scp -P <PORT> -r root@<IP>:~/langgraph-multi-llm-agent/l
 
 ## Results
 
-_Not run yet. This table is filled in only from measured runs._
+Qwen2.5-3B-Instruct, LoRA (rank 16, 3 epochs, 573 synthetic training trajectories). `base` and `tuned` were served from one vLLM server (bf16, same chat template, same prompt and tools) and scored by the same eval. Base was run twice (before and after training) and gave identical totals.
+
+| | base | tuned |
+|---|---|---|
+| Main eval (16 questions), passed | 9 | **13** |
+| Main eval, correct tools | 10 | **15** |
+| Main eval, facts in the answer | 13 | 13 |
+| Main eval, avg seconds per question | 6.7 | **3.5** |
+| Held-out docs (8 questions), passed | 3 | **7** |
+| Held-out, correct tools | 3 | **8** |
+| Held-out, facts in the answer | 5 | 7 |
+
+What changed: tool use. The base model sometimes answers a policy question without searching and calls unneeded cost or untagged-resource tools; the tuned model picks the right tool more consistently. Facts-in-answer on the main eval did not change (13 and 13), so the extra passes come from fewer forbidden or missing tool calls. Average model calls per question were nearly the same (2.4 vs 2.2), so the lower latency is not explained by fewer calls; I did not investigate why.
+
+Still failing after tuning: `c2`, `c3`, `c5` (main) and `h8` (held-out). `c2` made one extra tool call; `c3`, `c5` and `h8` missed a number or keyword in the answer. `c2` and `h8` passed on base and failed on tuned.
+
+Limits: 16 and 8 questions are small samples; training data is templated and built from the same document library, so this shows the behavior improved on this domain, not that it generalizes. Base numbers (bf16, vLLM) are not comparable to the Ollama Q4 numbers in the main README. Llama-3.2-3B has not been run yet.
+
+Raw results are in `eval/results/` (`vllm-qwen-base2*`, `vllm-qwen-tuned*`).
 
 ## Not verified yet
 
-Data generation, schema, masking logic and the shell scripts' syntax are tested offline. Everything that needs a GPU or Hugging Face (`train.py`, `render_check.py` against the real tokenizer, vLLM serving with the adapter) has not been run by the author of this folder; `--smoke` and `render_check.py` exist to catch problems in the first minutes.
+`train.py`, `render_check.py`, vLLM serving with the adapter and the tuned eval have now been run for Qwen2.5-3B (see Results). Llama-3.2-3B is untested. The adapter is not committed.

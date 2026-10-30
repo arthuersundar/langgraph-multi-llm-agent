@@ -1,0 +1,251 @@
+{
+  "summary": {
+    "provider": "vllm",
+    "label": "vllm-qwen-tuned-heldout",
+    "model": "tuned",
+    "data": "fixtures",
+    "when": "2026-10-30T12:50:03",
+    "questions": 8,
+    "passed": 7,
+    "tools_ok": 8,
+    "facts_ok": 7,
+    "errors": 0,
+    "guard_blocked": 0,
+    "guard_flagged": 0,
+    "routed_cheap": 0,
+    "total_seconds": 17.9,
+    "avg_seconds": 2.2,
+    "input_tokens": 12796,
+    "output_tokens": 556
+  },
+  "results": [
+    {
+      "id": "h1-rightsizing",
+      "kind": "heldout",
+      "question": "At what CPU level does an EC2 instance become a rightsizing candidate?",
+      "seconds": 3.0,
+      "error": null,
+      "answer": "The EC2 Rightsizing Guide says an instance is a rightsizing candidate when, over 14 days, peak CPU stays below 40% and memory stays below 50%.",
+      "tools_called": [
+        "search_policies_tool"
+      ],
+      "model_calls": 2,
+      "tokens": {
+        "input": 1627,
+        "output": 75
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "passed": true,
+      "missing_tools": [],
+      "forbidden_tools_called": [],
+      "missing_facts": [],
+      "bad_phrases": []
+    },
+    {
+      "id": "h2-gpu-approval",
+      "kind": "heldout",
+      "question": "Do I need approval to run a GPU instance?",
+      "seconds": 2.1,
+      "error": null,
+      "answer": "Yes, the EC2 Rightsizing Guide requires CCoE approval, the `gpu-justification` tag and stopping when not in use. Idle GPU instances are the most expensive waste pattern in our accounts.",
+      "tools_called": [
+        "search_policies_tool"
+      ],
+      "model_calls": 2,
+      "tokens": {
+        "input": 1494,
+        "output": 74
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "passed": true,
+      "missing_tools": [],
+      "forbidden_tools_called": [],
+      "missing_facts": [],
+      "bad_phrases": []
+    },
+    {
+      "id": "h3-public-bucket",
+      "kind": "heldout",
+      "question": "How fast must a public S3 bucket without approval be fixed?",
+      "seconds": 2.3,
+      "error": null,
+      "answer": "Fix within 4 hours, per the S3 Security Baseline (Severity 1). Missing encryption or TLS policy has a 5-day remediation window, and tags or logging need 10 business days.",
+      "tools_called": [
+        "search_policies_tool"
+      ],
+      "model_calls": 2,
+      "tokens": {
+        "input": 1547,
+        "output": 78
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "passed": true,
+      "missing_tools": [],
+      "forbidden_tools_called": [],
+      "missing_facts": [],
+      "bad_phrases": []
+    },
+    {
+      "id": "h4-s3-encryption",
+      "kind": "heldout",
+      "question": "What encryption is required for confidential data in S3?",
+      "seconds": 2.1,
+      "error": null,
+      "answer": "SSE-S3 for `internal` data, SSE-KMS with a customer-managed key for `confidential` and `restricted` data, according to the S3 Security Baseline.",
+      "tools_called": [
+        "search_policies_tool"
+      ],
+      "model_calls": 2,
+      "tokens": {
+        "input": 1570,
+        "output": 72
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "passed": true,
+      "missing_tools": [],
+      "forbidden_tools_called": [],
+      "missing_facts": [],
+      "bad_phrases": []
+    },
+    {
+      "id": "h5-key-rotation",
+      "kind": "heldout",
+      "question": "After how many days must IAM access keys be rotated?",
+      "seconds": 2.1,
+      "error": null,
+      "answer": "The IAM Access Baseline requires rotation of access keys older than 90 days. Keys that have not been used for 45 days are disabled.",
+      "tools_called": [
+        "search_policies_tool"
+      ],
+      "model_calls": 2,
+      "tokens": {
+        "input": 1547,
+        "output": 64
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "passed": true,
+      "missing_tools": [],
+      "forbidden_tools_called": [],
+      "missing_facts": [],
+      "bad_phrases": []
+    },
+    {
+      "id": "h6-graviton",
+      "kind": "heldout",
+      "question": "Which instance family do we prefer for Linux workloads, and how much cheaper is it?",
+      "seconds": 2.1,
+      "error": null,
+      "answer": "Graviton (`m7g`, `c7g`, `r7g`), typically 20% cheaper for similar performance.",
+      "tools_called": [
+        "search_policies_tool"
+      ],
+      "model_calls": 2,
+      "tokens": {
+        "input": 1549,
+        "output": 69
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "passed": true,
+      "missing_tools": [],
+      "forbidden_tools_called": [],
+      "missing_facts": [],
+      "bad_phrases": []
+    },
+    {
+      "id": "h7-agent-permissions",
+      "kind": "heldout",
+      "question": "What permissions may an AI agent workload hold in our accounts?",
+      "seconds": 2.2,
+      "error": null,
+      "answer": "Per the GenAI and Amazon Bedrock Usage Policy (Data rules), GenAI and agent workloads may only use read-only roles unless an action is explicitly approved. Agents may never hold permissions to delete resources.",
+      "tools_called": [
+        "search_policies_tool"
+      ],
+      "model_calls": 2,
+      "tokens": {
+        "input": 1629,
+        "output": 76
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "passed": true,
+      "missing_tools": [],
+      "forbidden_tools_called": [],
+      "missing_facts": [],
+      "bad_phrases": []
+    },
+    {
+      "id": "h8-root-account",
+      "kind": "heldout",
+      "question": "What are the rules for using the AWS root account?",
+      "seconds": 2.0,
+      "error": null,
+      "answer": "Only the IAM Access Baseline covers it, so I won't guess:",
+      "tools_called": [
+        "search_policies_tool"
+      ],
+      "model_calls": 2,
+      "tokens": {
+        "input": 1833,
+        "output": 48
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": true,
+      "facts_ok": false,
+      "passed": false,
+      "missing_tools": [],
+      "forbidden_tools_called": [],
+      "missing_facts": [
+        [
+          "MFA"
+        ]
+      ],
+      "bad_phrases": []
+    }
+  ]
+}

@@ -84,7 +84,7 @@ def collate(batch):
     }
 
 
-model = AutoModelForCausalLM.from_pretrained(args.base, torch_dtype=torch.bfloat16, attn_implementation="sdpa").cuda()
+model = AutoModelForCausalLM.from_pretrained(args.base, dtype=torch.bfloat16, attn_implementation="sdpa").cuda()
 model.gradient_checkpointing_enable()
 model.enable_input_require_grads()
 model = get_peft_model(model, LoraConfig(
@@ -93,11 +93,14 @@ model = get_peft_model(model, LoraConfig(
 model.print_trainable_parameters()
 
 out = Path(args.out)
+per_step = args.batch * (1 if args.smoke else args.accum)
+total_steps = 3 if args.smoke else int(-(-len(train) // per_step) * args.epochs)
+warmup_steps = max(1, int(0.05 * total_steps))   # newer transformers dropped warmup_ratio
 targs = TrainingArguments(
     output_dir=str(out.parent / "trainer"), num_train_epochs=args.epochs, max_steps=3 if args.smoke else -1,
     per_device_train_batch_size=args.batch, per_device_eval_batch_size=args.batch,
     gradient_accumulation_steps=1 if args.smoke else args.accum, learning_rate=args.lr,
-    lr_scheduler_type="cosine", warmup_ratio=0.05, bf16=True, logging_steps=5,
+    lr_scheduler_type="cosine", warmup_steps=warmup_steps, bf16=True, logging_steps=5,
     eval_strategy="no" if args.smoke else "epoch", save_strategy="no", report_to="none",
     remove_unused_columns=False, seed=args.seed, dataloader_num_workers=0)
 trainer = Trainer(model=model, args=targs, train_dataset=train, eval_dataset=val or None, data_collator=collate)

@@ -1,0 +1,265 @@
+{
+  "summary": {
+    "provider": "vllm",
+    "label": "vllm-qwen-base-heldout",
+    "model": "base",
+    "data": "fixtures",
+    "when": "2026-10-29T17:43:42",
+    "questions": 8,
+    "passed": 3,
+    "tools_ok": 3,
+    "facts_ok": 5,
+    "errors": 0,
+    "guard_blocked": 0,
+    "guard_flagged": 0,
+    "routed_cheap": 0,
+    "total_seconds": 31.7,
+    "avg_seconds": 4.0,
+    "input_tokens": 13046,
+    "output_tokens": 1880
+  },
+  "results": [
+    {
+      "id": "h1-rightsizing",
+      "kind": "heldout",
+      "question": "At what CPU level does an EC2 instance become a rightsizing candidate?",
+      "seconds": 2.0,
+      "error": null,
+      "answer": "There isn't a specific CPU threshold defined in Brightway's policies or AWS documentation that directly classifies an EC2 instance as a rightsizing candidate based solely on its CPU usage. Rightsizing typically involves balancing cost and performance needs, which includes factors like CPU utilization, memory, storage, and network bandwidth.\n\nTo determine if an EC2 instance is a rightsizing candidate, you would need to consider these factors and possibly consult AWS best practices or your organization's specific policies. \n\nWould you like to explore this further by checking AWS best practices or consulting our policies?",
+      "tools_called": [],
+      "model_calls": 1,
+      "tokens": {
+        "input": 508,
+        "output": 113
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": false,
+      "facts_ok": false,
+      "passed": false,
+      "missing_tools": [
+        "search_policies_tool"
+      ],
+      "forbidden_tools_called": [],
+      "missing_facts": [
+        [
+          "40%"
+        ]
+      ],
+      "bad_phrases": []
+    },
+    {
+      "id": "h2-gpu-approval",
+      "kind": "heldout",
+      "question": "Do I need approval to run a GPU instance?",
+      "seconds": 1.0,
+      "error": null,
+      "answer": "To determine if you need approval to run a GPU instance, we should first consult the company's policies regarding resource usage and approvals.\n\n<tool_call>\nname: search_policies_tool\narguments: {\"question\": \"Do I need approval to run a GPU instance?\"}\n</tool_call>",
+      "tools_called": [],
+      "model_calls": 1,
+      "tokens": {
+        "input": 503,
+        "output": 54
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": false,
+      "facts_ok": false,
+      "passed": false,
+      "missing_tools": [
+        "search_policies_tool"
+      ],
+      "forbidden_tools_called": [],
+      "missing_facts": [
+        [
+          "CCoE"
+        ]
+      ],
+      "bad_phrases": []
+    },
+    {
+      "id": "h3-public-bucket",
+      "kind": "heldout",
+      "question": "How fast must a public S3 bucket without approval be fixed?",
+      "seconds": 6.7,
+      "error": null,
+      "answer": "There are currently no untagged public S3 buckets in your AWS environment based on the sample data provided. However, the policy requires immediate action for unapproved public S3 buckets.\n\nGiven the current state, no specific untagged public S3 buckets need to be addressed immediately. Nonetheless, it is important to ensure compliance with the policy and to review the remediation process outlined in the **Untagged Resource Remediation Runbook**.\n\nIf you identify any untagged public S3 buckets in the future, they should be fixed within 4 hours according to the policy. \n\nWould you like to proceed with any further actions or confirm the status of other untagged resources?",
+      "tools_called": [
+        "search_policies_tool",
+        "untagged_resources_tool"
+      ],
+      "model_calls": 3,
+      "tokens": {
+        "input": 3324,
+        "output": 357
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": false,
+      "facts_ok": true,
+      "passed": false,
+      "missing_tools": [],
+      "forbidden_tools_called": [
+        "untagged_resources_tool"
+      ],
+      "missing_facts": [],
+      "bad_phrases": []
+    },
+    {
+      "id": "h4-s3-encryption",
+      "kind": "heldout",
+      "question": "What encryption is required for confidential data in S3?",
+      "seconds": 1.2,
+      "error": null,
+      "answer": "To determine the encryption requirements for confidential data in S3, let's first consult our company policies and runbooks.\n\n<tool_call>\nname: search_policies_tool, arguments: {question: \"encryption requirements for confidential data in S3\"}\n</tool_call>",
+      "tools_called": [],
+      "model_calls": 1,
+      "tokens": {
+        "input": 504,
+        "output": 49
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": false,
+      "facts_ok": false,
+      "passed": false,
+      "missing_tools": [
+        "search_policies_tool"
+      ],
+      "forbidden_tools_called": [],
+      "missing_facts": [
+        [
+          "KMS"
+        ]
+      ],
+      "bad_phrases": []
+    },
+    {
+      "id": "h5-key-rotation",
+      "kind": "heldout",
+      "question": "After how many days must IAM access keys be rotated?",
+      "seconds": 2.7,
+      "error": null,
+      "answer": "According to the **IAM Access Baseline** document, IAM access keys for human users in production accounts must be rotated if they are older than **90 days**. Additionally, access keys that are not used for 45 days are automatically disabled.\n\nTherefore, IAM access keys should be rotated after **90 days**.",
+      "tools_called": [
+        "search_policies_tool"
+      ],
+      "model_calls": 2,
+      "tokens": {
+        "input": 1581,
+        "output": 133
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "passed": true,
+      "missing_tools": [],
+      "forbidden_tools_called": [],
+      "missing_facts": [],
+      "bad_phrases": []
+    },
+    {
+      "id": "h6-graviton",
+      "kind": "heldout",
+      "question": "Which instance family do we prefer for Linux workloads, and how much cheaper is it?",
+      "seconds": 6.9,
+      "error": null,
+      "answer": "The cost breakdown for the last 30 days shows that Amazon Elastic Compute Cloud - Compute (EC2) is the largest expense area, accounting for $28,450.12. However, this dataset is generated for demonstration purposes and does not reflect actual AWS spending. To accurately assess the cost savings from switching to Graviton instances, we would need real historical data.\n\nGiven the recommendation in the policy to prefer Graviton instances for Linux workloads, which are typically 20% cheaper, we can infer that switching to Graviton instances could lead to significant cost savings. But without real data, we cannot provide an exact dollar amount.\n\nIn summary, based on the company policy, Graviton instances (`m7g`, `c7g`, `r7g`) are preferred for Linux workloads and are generally 20% cheaper than other instance families. However, to quantify the exact savings, we would need to analyze real AWS spending data.",
+      "tools_called": [
+        "search_policies_tool",
+        "cost_by_service_tool"
+      ],
+      "model_calls": 3,
+      "tokens": {
+        "input": 3053,
+        "output": 430
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": false,
+      "facts_ok": true,
+      "passed": false,
+      "missing_tools": [],
+      "forbidden_tools_called": [
+        "cost_by_service_tool"
+      ],
+      "missing_facts": [],
+      "bad_phrases": []
+    },
+    {
+      "id": "h7-agent-permissions",
+      "kind": "heldout",
+      "question": "What permissions may an AI agent workload hold in our accounts?",
+      "seconds": 7.1,
+      "error": null,
+      "answer": "Based on the policies found:\n\n1. **IAM Access Baseline**: \n   - Least privilege principle applies, meaning the `AdministratorAccess` role is limited to the platform break-glass role and sandbox accounts.\n   - Application roles follow a naming pattern `<team>-<application>-role` and grant only the actions they need.\n   - GenAI and agent workloads must use **read-only** roles unless an action is explicitly approved; agents must never hold permissions to delete resources.\n\n2. **GenAI and Amazon Bedrock Usage Policy**:\n   - GenAI and agent workloads must use **read-only** roles unless an action is explicitly approved.\n   - No `restricted` data may be sent to any model. `confidential` data only to Bedrock (data stays in our AWS account) or the internal vLLM platform, never to external APIs.\n   - Prompts and responses are logged for 30 days, with customer PII masked by the gateway before logging.\n\nGiven these policies, the AI agent workload should be assigned a **read-only** IAM role unless an action requires otherwise. The exact permissions would depend on the specific use case and the approved models for your use cases.\n\nNext, we should verify if there are any specific permissions needed for the AI agent workload by reviewing the [GenAI and Amazon Bedrock Usage Policy](Document: GenAI and Amazon Bedrock Usage Policy) section under \"Approved models\". Ensure that the workload is configured to use only the necessary actions for the approved models.\n\nTo summarize, the AI agent workload should be granted **read-only** permissions unless otherwise specified by the policy. Please review the policy document for detailed actions and ensure that the workload complies with the least privilege principle.",
+      "tools_called": [
+        "search_policies_tool"
+      ],
+      "model_calls": 2,
+      "tokens": {
+        "input": 1744,
+        "output": 501
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "passed": true,
+      "missing_tools": [],
+      "forbidden_tools_called": [],
+      "missing_facts": [],
+      "bad_phrases": []
+    },
+    {
+      "id": "h8-root-account",
+      "kind": "heldout",
+      "question": "What are the rules for using the AWS root account?",
+      "seconds": 4.1,
+      "error": null,
+      "answer": "The rules for using the AWS root account are outlined in the **IAM Access Baseline** document. Here are the key points:\n\n1. **No long-lived access keys** for human users in production accounts. Use SSO (IAM Identity Center). Access keys older than **90 days** must be rotated; keys unused for 45 days are disabled.\n2. **Root account:** MFA required; root must not be used for daily work. Any root login triggers a security alert.\n3. **Least privilege:** `AdministratorAccess` is limited to the platform break-glass role and sandbox accounts. Application roles follow the naming pattern `<team>-<application>-role` and grant only the actions they need.\n4. **MFA** is required for all console users.\n5. **External access:** IAM Access Analyzer findings for resources shared outside the organization must be reviewed within 5 business days.\n6. GenAI and agent workloads must use **read-only** roles unless an explicit action is approved; agents must never hold permissions to delete resources.",
+      "tools_called": [
+        "search_policies_tool"
+      ],
+      "model_calls": 2,
+      "tokens": {
+        "input": 1829,
+        "output": 243
+      },
+      "guard": {
+        "blocked": false,
+        "events": []
+      },
+      "ran_ok": true,
+      "tools_ok": true,
+      "facts_ok": true,
+      "passed": true,
+      "missing_tools": [],
+      "forbidden_tools_called": [],
+      "missing_facts": [],
+      "bad_phrases": []
+    }
+  ]
+}
