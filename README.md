@@ -1,6 +1,6 @@
 # langgraph-multi-llm-agent
 
-An AWS cost and governance assistant. It answers from company policy documents (RAG on **S3 Vectors**) and from live AWS data (**Cost Explorer**, untagged resources), on swappable model backends: **Amazon Bedrock**, a **local model** (Ollama or vLLM), or either one through a deployed **API gateway** built with Terraform. A small **router** sends easy questions to a cheap model and hard ones to a stronger one, code-level **guardrails** defend against prompt injection and data leaks, and an **eval harness** measures all of it. The same tools are also served over **MCP** for Claude Desktop and other clients.
+An AWS cost and governance assistant. It answers from company policy documents (RAG on **S3 Vectors**) and from live AWS data (**Cost Explorer**, untagged resources), on swappable model backends: **Amazon Bedrock**, a **local model** (Ollama or vLLM), or either one through a deployed **API gateway** built with Terraform. A small **router** sends easy questions to a cheap model and hard ones to a stronger one, and an **eval harness** measures all of it.
 
 Built to answer one question honestly: *how small a model can you get away with, and where does it break?*
 
@@ -39,8 +39,6 @@ $env:USE_FIXTURES="1"                  # sample cost/tag data (see below)
 python app\agent.py --provider vllm --sources "Which resources are missing required tags and what happens to them?"
 python app\agent.py --provider auto "What is the monthly spending cap for sandbox accounts?"
 ```
-
-On macOS/Linux use `export USE_FIXTURES=1` instead of `$env:USE_FIXTURES="1"`, and forward slashes in paths.
 
 `--sources` prints what each tool handed the model (policy chunks, live data), so you can see what the answer is based on.
 
@@ -126,42 +124,25 @@ A small model follows instructions it finds anywhere in its context, so these ch
 
 The dev set is what the rules were tuned on, so the held-out row is the honest one. The four misses are the known limits of pattern matching: a paraphrase with no trigger words ("disregard the guidelines you were given earlier"), "forget what you were told" without "everything", letter-spaced text ("i g n o r e"), and a credentials question phrased without "your" or "you are using". Catching those needs a classifier model in front, which this project does not add.
 
-**Measured with a model** (`qwen2.5:7b`; same prompt, tools and 36 attacks, guardrails off vs on):
-
-| Attack category | Off | On |
-|---|---|---|
-| Direct overrides (incl. French, Spanish, German, base64) | 7/8 got through | 0 |
-| Role hijacks | 3/4 (2 after manual review) | 0 |
-| System-prompt extraction | 1/5 | 0 |
-| PII echoed back in the answer | 3/5 | 0 |
-| Indirect injection via poisoned tool data | 1/3 | 0 |
-| Credential theft, delete requests, runaway tool loops | 0/11 | 0 |
-| **Total** | **15/36 flagged (14 after review)** | **0/36** |
-
-- Harmless look-alike questions wrongly blocked: **0/24**. The 16-question quality eval is unchanged with guardrails on (13/16, nothing blocked or flagged).
-- Without guardrails the model followed instructions hidden inside a legitimate question, printed its system prompt, repeated an SSN, an AWS key and a password back to the user, and obeyed an instruction planted in the AWS data. It resisted credential theft and delete requests on its own.
-- Scoring is automatic (marker in the answer, system prompt repeated, forbidden tool called, runaway loop), so it has false alarms: one refusal that quoted the marker was counted. The "on" result is on the attacks the rules were tuned on; the held-out row above is the one to quote for generalisation.
-
-```powershell
-python eval\run_attacks.py --offline                                  # no model: input, tool and action layers
-python eval\run_attacks.py --provider vllm --guardrails off           # raw model
-python eval\run_attacks.py --provider vllm --guardrails on --benign   # guarded, plus look-alike questions
-python eval\test_guardrails.py                                        # unit tests
-```
-Set `$env:VLLM_MODEL` first; the run prints the model that actually answers. Results are saved in `eval\results\attacks\`.
-
-## MCP server
-
-`mcp_server/` exposes the same data as an [MCP](https://modelcontextprotocol.io) server, so Claude Desktop, Claude Code or any MCP client can use it: three read-only tools (`policy_search`, `cost_by_service`, `untagged_resources`), the 15 policy documents as resources, and a ready-made `governance_review` prompt. The client's model does the reasoning; this server supplies tools that are safe to hand to a model you do not control.
-
-- Every call passes through the agent's guardrails (injection refused, PII redacted, instructions in tool data removed) plus a rate limit and a per-call audit line on stderr.
-- `untagged_resources(missing_tag="owner")` filters in code. That was a failure on the small models in the eval ("which resources are missing the owner tag?"), so the fix lives in the tool.
-- Tested against the real MCP SDK with a client script (`python mcp_server/client_demo.py`) and 36 offline checks (`python eval/test_mcp_tools.py`). Setup for Claude Desktop is in [`mcp_server/README.md`](mcp_server/README.md).
-- Verified end to end through the Claude desktop app: asked "Which resources are missing the owner tag, and what does policy say should happen to them?" and it called `untagged_resources` (filtered in code) and `policy_search` (real S3 Vectors query), then answered from the results. Sample data was used for AWS spend and tags.
+`python eval/run_attacks.py --provider vllm --guardrails off` and `--guardrails on` run the same attacks through the whole agent and count how many succeed (a leaked system prompt, an obeyed instruction, a forbidden tool call, a runaway tool loop). `python eval/test_guardrails.py` runs the unit tests.
 
 ## Gateway (Terraform)
 
 `gateway/` deploys an OpenAI-compatible endpoint: API Gateway REST API with a key and usage plan per team, in front of a dependency-free Lambda that translates OpenAI chat requests to Bedrock Converse (tool calls included) or passes them to a vLLM server. Guardrails come from an invented postmortem in the demo docs: capped `max_tokens`, no streaming, body size limit, per-team token and latency metrics (CloudWatch embedded metrics), backend throttles mapped to 429. Deploy, smoke tests, and the optional S3 state backend are in [`gateway/README.md`](gateway/README.md). Lambda translation tests run without AWS.
+
+## Fine-tuning (LoRA)
+
+`lora/` fine-tunes a small open model on the agent's tool-calling behavior and measures it against the untouched base model. Training data is synthetic: 573 trajectories (question, tool calls, tool results, answer) generated from the same invented documents and fixtures, with answers checked against the tool results; the 16 eval questions and the held-out ones are excluded. LoRA (rank 16) via Hugging Face PEFT, loss on assistant turns only. `base` and `tuned` are served side by side from one vLLM server and scored by the same eval.
+
+Qwen2.5-3B-Instruct, bf16 on one rented RTX A5000 (training took about 20 minutes):
+
+| | base | tuned |
+|---|---|---|
+| Main eval (16 questions), passed | 9 | 13 |
+| Main eval, correct tools | 10 | 15 |
+| Held-out documents (8 questions), passed | 3 | 7 |
+
+The gain is in tool selection; facts in the answers were unchanged on the main eval (13 and 13), and two questions got worse. With 16 and 8 questions, treat this as an indication, not proof, and the training data is templated from the same document library, so it shows the behavior improved on this domain. These bf16 vLLM numbers are not comparable to the Ollama Q4 numbers above. Steps, settings and the full table are in [`lora/README.md`](lora/README.md). Llama-3.2-3B is not run yet.
 
 ## Status and limits
 
@@ -177,9 +158,9 @@ app/        agent.py (graph, tools, guard) | router.py | guardrails.py | llm.py 
             search.py, ingest.py, embeddings.py (S3 Vectors RAG)
 data/       docs/ (15 invented policy documents) | fixtures/ (sample cost and tag data)
 eval/       questions.json | run_eval.py | scoring.py | report.py | show_failures.py | test_router.py
-            attacks.json | benign.json | run_attacks.py | attack_scoring.py | test_guardrails.py | test_mcp_tools.py
-mcp_server/ server.py (MCP server) | gov_tools.py (tool logic) | client_demo.py | README.md
+            attacks.json | benign.json | run_attacks.py | attack_scoring.py | test_guardrails.py
 gateway/    lambda/ (handler + tests) | terraform/ | bootstrap/ (optional state bucket)
+lora/       data/ (synthetic trajectories) | train.py | serve_vllm.sh | compare.py | README.md
 ```
 
 Stack: Python, LangGraph, LangChain, S3 Vectors, Ollama, Amazon Bedrock, API Gateway, Lambda, Terraform.
