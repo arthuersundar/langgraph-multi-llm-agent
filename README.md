@@ -126,9 +126,15 @@ The dev set is what the rules were tuned on, so the held-out row is the honest o
 
 `python eval/run_attacks.py --provider vllm --guardrails off` and `--guardrails on` run the same attacks through the whole agent and count how many succeed (a leaked system prompt, an obeyed instruction, a forbidden tool call, a runaway tool loop). `python eval/test_guardrails.py` runs the unit tests.
 
+## MCP server
+
+`mcp_server/` exposes the same three read-only tools (`policy_search`, `cost_by_service`, `untagged_resources`) plus the policy documents and a `governance_review` prompt to any MCP client (Claude Desktop, Claude Code, your own agent), with the same guardrails as the agent. `python eval/test_mcp_tools.py` runs the unit tests without AWS; `python mcp_server/client_demo.py` starts the server and talks to it like a client. Setup and the Claude Desktop config are in [`mcp_server/README.md`](mcp_server/README.md).
+
 ## Gateway (Terraform)
 
 `gateway/` deploys an OpenAI-compatible endpoint: API Gateway REST API with a key and usage plan per team, in front of a dependency-free Lambda that translates OpenAI chat requests to Bedrock Converse (tool calls included) or passes them to a vLLM server. Guardrails come from an invented postmortem in the demo docs: capped `max_tokens`, no streaming, body size limit, per-team token and latency metrics (CloudWatch embedded metrics), backend throttles mapped to 429. Deploy, smoke tests, and the optional S3 state backend are in [`gateway/README.md`](gateway/README.md). Lambda translation tests run without AWS.
+
+**Observability:** per-team requests, tokens, estimated cost (tokens times example prices, not the AWS bill) and p50/p95/p99 latency go to CloudWatch with a dashboard, alarms to an SNS topic, and X-Ray traces. On the deployed gateway, 40 requests with Bedrock quota at 0 all came back 429, and the dashboard showed each one waiting about 8 s (average 7,968 ms) because the SDK retried before giving up. Capping retries cut the wait to roughly 0.2 to 1.1 s. Details and the alarm behavior are in [`gateway/README.md`](gateway/README.md).
 
 ## Fine-tuning (LoRA)
 
@@ -160,6 +166,7 @@ data/       docs/ (15 invented policy documents) | fixtures/ (sample cost and ta
 eval/       questions.json | run_eval.py | scoring.py | report.py | show_failures.py | test_router.py
             attacks.json | benign.json | run_attacks.py | attack_scoring.py | test_guardrails.py
 gateway/    lambda/ (handler + tests) | terraform/ | bootstrap/ (optional state bucket)
+mcp_server/ server.py | gov_tools.py | client_demo.py
 lora/       data/ (synthetic trajectories) | train.py | serve_vllm.sh | compare.py | README.md
 ```
 
